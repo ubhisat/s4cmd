@@ -53,7 +53,7 @@ TEMP_FILES = set()
 # Environment variable names for S3 credentials.
 S3_ACCESS_KEY_NAME = "S3_ACCESS_KEY"
 S3_SECRET_KEY_NAME = "S3_SECRET_KEY"
-
+S3_HOST = "S3_HOST"
 
 ##
 ## Utility classes
@@ -74,7 +74,7 @@ class Options:
     self.verbose = (opt and opt.verbose != None)
     self.debug = (opt and opt.debug != None)
     self.validate = (opt and opt.validate != None)
-    self.use_ssl = (opt and opt.use_ssl != None)
+    self.use_ssl = (opt and opt.use_ssl == None)
     self.show_dir = (opt and opt.show_dir != None)
     self.delete_removed = (opt and opt.delete_removed != None)
     self.ignore_empty_source = (opt and opt.ignore_empty_source)
@@ -466,6 +466,7 @@ class S3Handler(object):
   '''
 
   S3_KEYS = None
+  S3_HOST = None
 
   @staticmethod
   def s3_keys_from_env():
@@ -504,6 +505,43 @@ class S3Handler(object):
       opt = Options()
     S3Handler.S3_KEYS = S3Handler.s3_keys_from_env() or S3Handler.s3_keys_from_s3cfg(opt)
 
+  @staticmethod
+  def s3_host_from_env():
+    '''Retrieve S3 host from the environment, or None if not present.'''
+    env = os.environ
+    if S3_HOST in env:
+      host = env[S3_HOST]
+      log.debug("read S3 host from environment")
+      return host
+    else:
+      return None
+
+  @staticmethod
+  def s3_host_from_s3cfg(opt):
+    '''Retrieve S3 hot settings from s3cmd's config file, if present; otherwise return None.'''
+    try:
+      if opt.s3cfg != None:
+        s3cfg_path = "%s" % opt.s3cfg
+      else:
+        s3cfg_path = "%s/.s3cfg" % os.environ["HOME"]
+      if not os.path.exists(s3cfg_path):
+        return None
+      config = ConfigParser.ConfigParser()
+      config.read(s3cfg_path)
+      host = config.get("default", "host_base")
+      log.debug("read S3 host from $HOME/.s3cfg file")
+      return host
+    except Exception, e:
+      log.info("could not read S3 host from %s file; skipping (%s)", s3cfg_path, e)
+      return None
+
+  @staticmethod
+  def init_s3_host(opt=None):
+    '''Initialize s3 host from environment varialbe or s3cfg config file.'''
+    if opt is None:
+      opt = Options()
+    S3Handler.S3_HOST = S3Handler.s3_host_from_env() or S3Handler.s3_host_from_s3cfg(opt)
+
   def __init__(self, opt=None):
     '''Constructor, connect to S3 store'''
     if opt is None:
@@ -524,6 +562,7 @@ class S3Handler(object):
       if S3Handler.S3_KEYS:
         self.s3 = boto.connect_s3(S3Handler.S3_KEYS[0],
                                   S3Handler.S3_KEYS[1],
+                                  host=S3Handler.S3_HOST,
                                   is_secure = self.opt.use_ssl,
                                   suppress_consec_slashes = False)
       else:
@@ -1409,6 +1448,8 @@ if __name__ == '__main__':
 
   # Initalize keys for S3.
   S3Handler.init_s3_keys(options)
+  # Initalize host for S3.
+  S3Handler.init_s3_host(options)
 
   try:
     CommandHandler(opt).run(args)
